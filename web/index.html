@@ -1,0 +1,225 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Student-based Resource Optimizer</title>
+    <style>
+      :root {
+        --bg: #0e1116;
+        --panel: #11161d;
+        --border: #1f2630;
+        --text: #e6edf3;
+        --muted: #9da7b3;
+        --accent: #3b82f6;
+        --accent-2: #10b981;
+        --danger: #ef4444;
+      }
+      html, body { background: var(--bg); color: var(--text); }
+      body { font-family: Arial, sans-serif; margin: 2rem; }
+      h1, h2 { margin: 0 0 0.75rem 0; }
+      fieldset { border: 1px solid var(--border); background: var(--panel); padding: 1rem; margin-bottom: 1rem; border-radius: 8px; }
+      label { display: inline-block; margin: 0.25rem 0; }
+      select { padding: 0.45rem 0.6rem; border-radius: 6px; border: 1px solid var(--border); background: #0c1117; color: var(--text); }
+      table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; background: var(--panel); border-radius: 8px; overflow: hidden; }
+      th, td { border-bottom: 1px solid var(--border); padding: 0.6rem; text-align: left; }
+      th { background: #0f1420; color: var(--muted); font-weight: 600; }
+      tfoot th { color: var(--text); }
+      button { padding: 0.6rem 0.9rem; border: 1px solid var(--border); background: #0f1420; color: var(--text); border-radius: 8px; cursor: pointer; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+      button.primary:hover { filter: brightness(1.05); }
+      .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+      .row > div { flex: 1; min-width: 320px; }
+      .muted { color: var(--muted); font-size: 0.95rem; }
+      .right { text-align: right; }
+      .success { color: var(--accent-2); }
+      .error { color: var(--danger); }
+      .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; }
+      .kv { display: grid; grid-template-columns: 1fr auto; gap: 0.5rem 1rem; }
+      .big { font-size: 1.1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Student-based Resource Optimizer</h1>
+    <p class="muted">Select dataset and target year. The tool forecasts student demand to that year, computes the <b>recommended budget</b> using a medium cost-per-student, and allocates it across departments proportionally to forecasted need.</p>
+
+    <div class="row">
+      <div class="panel">
+        <h2>Parameters</h2>
+        <div class="kv">
+          <label for="dataset">Dataset</label>
+          <select id="dataset" onchange="onDatasetChange()"></select>
+          <label for="targetYear">Target Year</label>
+          <select id="targetYear"></select>
+        </div>
+        <div style="margin-top: 1rem;">
+          <button class="primary" type="button" onclick="runLocalOptimization()">Generate Allocation</button>
+          <span id="status" class="muted" style="margin-left: 0.5rem;"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Optimized Allocation</h2>
+        <div id="summary" class="muted">Select parameters and click Generate Allocation.</div>
+        <div id="results" class="muted"></div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top: 1rem;">
+      <h2>Historical Students (Yearly)</h2>
+      <div id="historical"></div>
+    </div>
+
+    <script>
+      // Medium cost per student (fixed)
+      const COST_PER_STUDENT = 1500;
+
+      // Larger, meaningful multi-year historical datasets
+      const datasets = [
+        {
+          name: 'Default (Urban University)',
+          departments: [
+            { department: 'Education', series: [ { period: '2020', value: 4200 }, { period: '2021', value: 4600 }, { period: '2022', value: 4950 }, { period: '2023', value: 5300 }, { period: '2024', value: 5600 } ] },
+            { department: 'Health',    series: [ { period: '2020', value: 3300 }, { period: '2021', value: 3500 }, { period: '2022', value: 3850 }, { period: '2023', value: 4120 }, { period: '2024', value: 4400 } ] },
+            { department: 'STEM',      series: [ { period: '2020', value: 6200 }, { period: '2021', value: 6800 }, { period: '2022', value: 7400 }, { period: '2023', value: 8000 }, { period: '2024', value: 8600 } ] },
+            { department: 'Arts',      series: [ { period: '2020', value: 2400 }, { period: '2021', value: 2500 }, { period: '2022', value: 2650 }, { period: '2023', value: 2780 }, { period: '2024', value: 2920 } ] }
+          ]
+        },
+        {
+          name: 'Growth Focus (Tech-forward)',
+          departments: [
+            { department: 'Education', series: [ { period: '2020', value: 3600 }, { period: '2021', value: 3900 }, { period: '2022', value: 4300 }, { period: '2023', value: 4700 }, { period: '2024', value: 5100 } ] },
+            { department: 'Health',    series: [ { period: '2020', value: 2800 }, { period: '2021', value: 3000 }, { period: '2022', value: 3350 }, { period: '2023', value: 3720 }, { period: '2024', value: 4100 } ] },
+            { department: 'STEM',      series: [ { period: '2020', value: 7000 }, { period: '2021', value: 7800 }, { period: '2022', value: 8700 }, { period: '2023', value: 9600 }, { period: '2024', value: 10500 } ] },
+            { department: 'Arts',      series: [ { period: '2020', value: 2100 }, { period: '2021', value: 2150 }, { period: '2022', value: 2200 }, { period: '2023', value: 2250 }, { period: '2024', value: 2300 } ] }
+          ]
+        },
+        {
+          name: 'Balanced (Regional)',
+          departments: [
+            { department: 'Education', series: [ { period: '2020', value: 3000 }, { period: '2021', value: 3150 }, { period: '2022', value: 3300 }, { period: '2023', value: 3450 }, { period: '2024', value: 3600 } ] },
+            { department: 'Health',    series: [ { period: '2020', value: 2600 }, { period: '2021', value: 2700 }, { period: '2022', value: 2825 }, { period: '2023', value: 2950 }, { period: '2024', value: 3080 } ] },
+            { department: 'STEM',      series: [ { period: '2020', value: 4500 }, { period: '2021', value: 4700 }, { period: '2022', value: 4950 }, { period: '2023', value: 5200 }, { period: '2024', value: 5450 } ] },
+            { department: 'Arts',      series: [ { period: '2020', value: 2000 }, { period: '2021', value: 2050 }, { period: '2022', value: 2100 }, { period: '2023', value: 2160 }, { period: '2024', value: 2220 } ] }
+          ]
+        }
+      ];
+
+      function yearsFromDataset(ds) {
+        const set = new Set();
+        for (const d of ds.departments) for (const p of d.series) set.add(p.period);
+        return Array.from(set).map(Number).sort((a,b)=>a-b);
+      }
+
+      function populateSelectors() {
+        const dsSel = document.getElementById('dataset');
+        dsSel.innerHTML = datasets.map((d, i) => `<option value="${i}">${d.name}</option>`).join('');
+        onDatasetChange();
+      }
+
+      function onDatasetChange() {
+        const ds = datasets[Number(document.getElementById('dataset').value || 0)] || datasets[0];
+        const years = yearsFromDataset(ds);
+        const last = years[years.length - 1];
+        const targetSel = document.getElementById('targetYear');
+        const options = [];
+        for (let y = last; y <= last + 6; y++) options.push(`<option value="${y}">${y}</option>`);
+        targetSel.innerHTML = options.join('');
+        renderHistorical(ds);
+      }
+
+      // Render yearly table
+      function renderHistorical(ds) {
+        const container = document.getElementById('historical');
+        const years = yearsFromDataset(ds).map(String);
+        const head = ['Department', ...years].map(h => `<th>${h}</th>`).join('');
+        const rows = ds.departments.map(d => {
+          const map = Object.fromEntries(d.series.map(s => [s.period, s.value]));
+          const tds = [d.department, ...years.map(y => map[y] ?? '')].map(x => `<td>${x}</td>`).join('');
+          return `<tr>${tds}</tr>`;
+        }).join('');
+        container.innerHTML = `
+          <table>
+            <thead><tr>${head}</tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <p class="muted">Historical data is fixed; forecasting projects to the selected year.</p>
+        `;
+      }
+
+      // Pure-JS linear regression forecast (yearly)
+      function linearRegressionPredict(values, stepsAhead) {
+        const n = values.length;
+        if (n === 0) return Array(stepsAhead).fill(0);
+        if (n === 1) return Array(stepsAhead).fill(values[0]);
+        const xSum = (n - 1) * n / 2;
+        const x2Sum = (n - 1) * n * (2 * n - 1) / 6;
+        const ySum = values.reduce((a, b) => a + b, 0);
+        let xySum = 0; for (let i = 0; i < n; i++) xySum += i * values[i];
+        const denom = n * x2Sum - xSum * xSum;
+        const slope = denom === 0 ? 0 : (n * xySum - xSum * ySum) / denom;
+        const intercept = (ySum - slope * xSum) / n;
+        const out = [];
+        for (let k = 0; k < stepsAhead; k++) out.push(Math.max(0, intercept + slope * (n + k)));
+        return out;
+      }
+
+      function sumForecastToYear(values, fromYear, toYear) {
+        const steps = Math.max(1, Number(toYear) - Number(fromYear));
+        return linearRegressionPredict(values, steps).reduce((a, b) => a + b, 0);
+      }
+
+      function runLocalOptimization() {
+        const summary = document.getElementById('summary');
+        const results = document.getElementById('results');
+        summary.textContent = 'Computing...'; summary.className = 'muted'; results.innerHTML = '';
+        try {
+          const ds = datasets[Number(document.getElementById('dataset').value || 0)] || datasets[0];
+          const targetYear = Number(document.getElementById('targetYear').value);
+
+          const years = yearsFromDataset(ds); const lastYear = years[years.length - 1];
+          const departments = ds.departments.map(d => d.department);
+          const forecastedStudents = {}; let totalStudents = 0;
+          for (const d of ds.departments) {
+            const values = d.series.map(s => Number(s.value || 0));
+            const projected = sumForecastToYear(values, lastYear, targetYear);
+            forecastedStudents[d.department] = Math.max(projected, 0);
+            totalStudents += forecastedStudents[d.department];
+          }
+
+          const recommendedBudget = totalStudents * COST_PER_STUDENT;
+          const allocations = {};
+          if (totalStudents > 0) {
+            for (const dep of departments) {
+              const share = forecastedStudents[dep] / totalStudents;
+              allocations[dep] = share * recommendedBudget;
+            }
+          } else {
+            for (const dep of departments) allocations[dep] = 0;
+          }
+
+          const rows = departments.map(dep => {
+            const students = forecastedStudents[dep] || 0;
+            const alloc = allocations[dep] || 0;
+            return `<tr><td>${dep}</td><td class=right>${students.toFixed(0)}</td><td class=right>$${alloc.toFixed(2)}</td></tr>`;
+          }).join('');
+          const totalAlloc = Object.values(allocations).reduce((a, b) => a + b, 0);
+          results.innerHTML = `
+            <table>
+              <thead><tr><th>Department</th><th class=right>Forecasted Students (${targetYear})</th><th class=right>Recommended Allocation</th></tr></thead>
+              <tbody>${rows}</tbody>
+              <tfoot><tr><th>Total</th><th class=right>${totalStudents.toFixed(0)}</th><th class=right>$${totalAlloc.toFixed(2)}</th></tr></tfoot>
+            </table>
+          `;
+          summary.innerHTML = `<span class=big>Recommended total budget (Medium cost, $${COST_PER_STUDENT}/student): <b>$${recommendedBudget.toFixed(2)}</b></span>`;
+          summary.className = 'success';
+        } catch (e) {
+          summary.textContent = 'Error: ' + e.message; summary.className = 'error';
+          results.innerHTML = '';
+        }
+      }
+
+      populateSelectors();
+    </script>
+  </body>
+</html>
