@@ -8,9 +8,4 @@ services:
     healthCheckPath: /health
     autoDeploy: true
 
-  - type: static
-    name: agentic-resource-optimizer-web
-    staticPublishPath: web
-    pullRequestPreviewsEnabled: false
-
 
